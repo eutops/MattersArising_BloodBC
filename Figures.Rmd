@@ -1,0 +1,1208 @@
+---
+title: "Figures"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    fig_width: 7
+    fig_height: 6
+    fig_caption: true
+---
+# Settings
+
+```{r, include=FALSE}
+
+# Set up knitr options to hide warnings, messages, and code echoing
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE)
+
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(ComplexHeatmap)
+library(pROC)
+library(wesanderson)
+library(circlize)
+
+# Helper functions for plotting ROC curves
+source(file.path(getwd(), "src/plot_single_roc.R"))
+source(file.path(getwd(), "src/plot_double_roc.R"))
+source(file.path(getwd(), "src/plot_roc_dichot.R"))
+
+# Define global color palette
+c.AUC <- "red" # AUC lines
+c.BC <- "#F8736A" # Breast Cancer
+c.control <- "#00BFC4" # Control
+
+# Define dataset-specific colors
+c.forecee <- "#f4a582"
+c.wang <- "#9e9ac8"
+c.GSE117929 <- "#416165"
+
+# Define high and low colors for specific datasets
+c.forecee.low <- c.forecee
+c.forecee.high <- '#eb5a1a' # slightly darker
+c.wang.low <- '#ababab'
+c.wang.high <- '#000000'
+
+# Define heatmap color palette
+my_palette <- colorRamp2(c(0, 0.5, 1), c("blue", "white", "red"))
+
+# Load dataframes
+load(file.path(getwd(), "data/GSE42861.Rdata")) # data_GSE4286 (RA)
+load(file.path(getwd(), "data/GSE131989.Rdata")) # data_GSE131989 (RA)
+load(file.path(getwd(), "data/GSE117929.Rdata")) # data_GSE117929 (systemic sclerosis)
+load(file.path(getwd(), "data/IARC.Rdata")) # data_iarc
+load(file.path(getwd(), "data/PLCO.Rdata")) # data_plco
+load(file.path(getwd(), "data/FORECEE.Rdata")) # data_forecee
+load(file.path(getwd(), "data/WANG.Rdata")) # data_wang
+load(file.path(getwd(), "data/snp.Rdata")) # SNP / methylationQTL data: pheno_long
+
+# Recode names to case and control for specific datasets
+data_wang <- data_wang %>%
+  mutate(type = recode(type, 'normal' = 'Control', 'BC' = 'Case'))
+data_wang$type <- factor(data_wang$type, levels = c('Control', 'Case'))
+
+data_forecee <- data_forecee %>%
+  mutate(type = recode(type, 'Control' = 'Control', 'Breast' = 'Case'))
+
+# Select specific CpGs of interest
+cgs <- c(
+  "cg14507403",
+  "cg09821790",
+  "cg15694422",
+  "cg27527887",
+  "cg11754974",
+  "cg16652347", "cg13828440", "cg18637238"
+)
+
+# Define main CpGs
+cgs_main <- c("cg11754974", "cg16652347", "cg13828440", "cg18637238")
+
+# Define cell type names
+celltypes <- c(
+  "Epi", "Fib", "CD4Tnv", "CD4Tmem", "Bmem", "Bnv", "Treg", "CD8Tmem", "CD8Tnv", "NK", "Mono", "Granulocytes"
+)
+
+# Pivot dataframes to long format
+data_forecee_long <- data_forecee %>%
+  tidyr::pivot_longer(any_of(cgs),
+                      names_to = "cg",
+                      values_to = "beta")
+data_wang_long <- data_wang %>%
+  tidyr::pivot_longer(any_of(cgs),
+                      names_to = "cg",
+                      values_to = "beta")
+data_plco_long <- data_plco %>%
+  tidyr::pivot_longer(any_of(cgs),
+                      names_to = "cg",
+                      values_to = "beta")
+data_iarc_long <- data_iarc %>%
+  tidyr::pivot_longer(any_of(cgs),
+                      names_to = "cg",
+                      values_to = "beta")
+data_GSE117929_long <- data_GSE117929 %>%
+  tidyr::pivot_longer(any_of(cgs),
+                      names_to = "cg",
+                      values_to = "beta")
+data_GSE131989_long <- data_GSE131989 %>%
+  tidyr::pivot_longer(any_of(cgs),
+                      names_to = "cg",
+                      values_to = "beta")
+data_GSE42861_long <- data_GSE42861 %>%
+  tidyr::pivot_longer(any_of(cgs),
+                      names_to = "cg",
+                      values_to = "beta")
+
+# Calculate granulocytes for FORECEE & Wang data
+data_forecee <- data_forecee %>%
+  mutate(Granulocytes = rowSums(select(., Eos, Neu, Baso))) 
+
+data_wang <- data_wang %>%
+  mutate(Granulocytes = rowSums(select(., Eos, Neu, Baso))) 
+
+# Combine specific datasets for joint analysis
+combined_tibble <- bind_rows(data_forecee_long, data_wang_long, data_GSE117929_long)
+combined_tibble <- combined_tibble %>%
+  mutate(type = recode(type, 
+                        'BC' = 'Case', 
+                        'Breast' = 'Case',
+                        'normal' = 'Control'))
+
+# Calculate granulocytes and pivot to long format
+combined_tibble <- combined_tibble %>%
+  mutate(Granulocytes = rowSums(select(., Eos, Neu, Baso))) %>%
+  select(-Eos, -Neu, -Baso)
+combined_tibble_long <- combined_tibble %>%
+  tidyr::pivot_longer(any_of(celltypes),
+                      names_to = "Cell Type",
+                      values_to = "Fraction")
+
+# Filter combined data based on specific CpG site
+combined_cg14507403 <- bind_rows(data_forecee_long, data_wang_long, data_plco_long)
+combined_cg14507403 <- combined_cg14507403 %>%
+  mutate(type = recode(type, 
+                        'BC' = 'Case', 
+                        'Breast' = 'Case',
+                        'normal' = 'Control'))
+
+# Calculate granulocytes and filter based on CpG site
+combined_cg14507403 <- combined_cg14507403 %>%
+  mutate(Granulocytes = rowSums(select(., Eos, Neu, Baso))) %>%
+  select(-Eos, -Neu, -Baso) %>%
+  filter(cg == "cg14507403")
+
+# Convert time_to_event to years for PLCO dataset
+data_plco_long$time_to_event <- data_plco_long$time_to_event / 365
+
+# Create 'type_years' column for PLCO dataset based on specified conditions
+data_plco_long <- data_plco_long %>%
+  mutate(type_years = case_when(
+    is.na(type) ~ "Control",
+    time_to_event <= 1 ~ "Case ≤1 year",
+    time_to_event > 1 & time_to_event <= 3 ~ "Case 1-3 years",
+    time_to_event > 3 & time_to_event <= 10 ~ "Case 3-10 years",
+    time_to_event > 10 ~ "Case 10+ years",
+    TRUE ~ NA_character_
+  ))
+
+data_plco_long$type_years[data_plco_long$type == 'Control'] <- 'Control'
+
+# Define the desired order of levels for type_years
+desired_order <- c("Control","Case ≤1 year", "Case 1-3 years", "Case 3-10 years", "Case 10+ years")
+
+# Reorder the type_years factor based on the desired order
+data_plco_long$type_years <- factor(data_plco_long$type_years, levels = desired_order)
+
+
+# Create the 'type_years' column based on the specified conditions
+# min 0.05, max 19
+data_iarc_long <- data_iarc_long %>%
+  mutate(type_years = case_when(
+    is.na(time_to_event) ~ "Control",
+    time_to_event <= 1 ~ "Case ≤1 year",
+    time_to_event > 1 & time_to_event <= 3 ~ "Case 1-3 years",
+    time_to_event > 3 & time_to_event <= 10 ~ "Case 3-10 years",
+    time_to_event > 10 ~ "Case 10+ years",
+    TRUE ~ NA_character_
+  ))
+
+
+# Define the desired order of levels for type_years
+desired_order <- c("Control","Case ≤1 year", "Case 1-3 years", "Case 3-10 years", "Case 10+ years")
+
+# Reorder the type_years factor based on the desired order
+data_iarc_long$type_years <- factor(data_iarc_long$type_years, levels = desired_order)
+
+
+```
+
+
+
+
+
+
+# Figure 1: FORECEE versus WANG  {.tabset}
+
+### A: [FORECEE] Heatmap of beta values in individuals
+
+
+```{r, echo=FALSE, message=FALSE}
+
+# Create a HeatmapAnnotation object for 'type' annotation with custom colors
+annotation_type <- HeatmapAnnotation(
+  'Real Status' = data_forecee$type, col=list('Real Status'=c("Control" = c.control, "Case" = c.BC),annotation_name_gp= gpar(fontsize = 3))
+)
+
+# Create a Heatmap object
+heatmap_obj <- Heatmap(
+  t(data_forecee[cgs_main]),
+  name = "Beta",
+  column_title = "Individuals",
+  row_title = "CpGs",
+  row_title_gp = gpar(fontsize = 8),
+  column_title_gp = gpar(fontsize = 8),
+  cluster_columns = TRUE,  # Cluster columns (individuals)
+  cluster_rows = TRUE,     # Do not cluster rows (CpGs)
+  show_row_names = TRUE,   # Show row names
+  show_column_names = FALSE,  # Show column names
+  show_heatmap_legend = TRUE,  # Show the heatmap legend
+  top_annotation = annotation_type,
+  col = my_palette  # Apply the custom color palette
+)
+
+
+
+grob = grid.grabExpr(draw(heatmap_obj)) 
+```
+
+
+
+### B) [WANG & FORECEE & GSE117929 & GSE42861 & GSE131989] Boxplots of 8 CpGs case/control methylation
+
+
+```{r}
+
+tmp2 <- data_GSE131989_long[data_GSE131989_long$celltype=="CD4Nv",] # Only cd4nv
+
+
+# Combine wang and forecee for combined plots
+tmp <- bind_rows(data_forecee_long, data_wang_long,data_GSE117929_long, data_GSE42861_long, tmp2)
+tmp <- tmp %>%
+  mutate(type = recode(type, 
+                        'BC' = 'Case', 
+                        'Breast' = 'Case',
+                        'normal' = 'Control',
+                       'RA' = 'Case'))
+
+tmp$dataset <- factor(tmp$dataset, levels=c(   "WANG" , "FORECEE",    "GSE117929", "GSE42861", "GSE131989"))
+tmp$type <- factor(tmp$type, levels=c("Control" , "Case"))
+
+# Add extra label
+tmp$datatype <- "BC"
+tmp$datatype[tmp$dataset=="GSE117929"] <- "SSc"
+tmp$datatype[tmp$dataset=="GSE42861"] <- "RA; whole blood"
+tmp$datatype[tmp$dataset=="GSE131989"] <- "RA; CD4nv"
+tmp$datatype <- as.factor(tmp$datatype)
+
+
+
+
+boxplot_values <- ggplot(tmp, aes(x = type, y = beta, fill = type)) +
+  geom_boxplot(outlier.size = 0.2,width = 0.5,linewidth = 0.2)  +
+  facet_grid(cg~datatype+dataset)   +
+  labs(y = "β value", x = "", fill = "") +
+  ggpubr::stat_compare_means(comparisons = list(c("Control", "Case")),
+                             label = 'p.format',vjust = -.2,
+                             hide.ns = F, size=3) +
+  theme_minimal() +
+ # scale_y_continuous(breaks=equal_breaks(n=2, s=0.1)) +
+  theme_classic() +
+  coord_cartesian(clip = 'off') +
+ theme(
+   strip.background = element_rect(
+     color=NA, fill=NA, size=1.5, linetype="solid"
+     )
+   ) +scale_y_continuous(breaks=seq(0,1,by=0.5))  +
+  theme(legend.position = "None",  # Move the legend to the bottom
+        panel.grid.minor = element_blank(),
+        strip.text.y = element_text(angle = 0)) +
+  theme(strip.text.y = element_text(angle = 270, vjust = +0.8),
+        axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+boxplot_values
+boxplot_forecee_wang <- wrap_elements(boxplot_values)
+boxplot_forecee_wang
+```
+
+
+
+
+
+### C): [FORECEE+WANG] AUC of the 4 selected CpGs in BC/normal + SUM
+ 
+```{r}
+AUC_wang_forecee_1 <- plot_double_roc(data_wang$type, data_wang$cg11754974, data_forecee$type, data_forecee$cg11754974, col1 = "#000000", col2 = c.forecee, title= "WANG", title2 = "FORECEE", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg11754974", labelSize=2.1)
+
+AUC_wang_forecee_2 <-plot_double_roc(data_wang$type, data_wang$cg16652347, data_forecee$type, data_forecee$cg16652347, col1 = "#000000", col2 = c.forecee, title= "WANG", title2 = "FORECEE", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg16652347", labelSize=2.1)
+
+AUC_wang_forecee_3 <-plot_double_roc(data_wang$type, data_wang$cg13828440, data_forecee$type, data_forecee$cg13828440, col1 = "#000000", col2 = c.forecee, title= "WANG", title2 = "FORECEE", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg13828440", labelSize=2.1)
+
+AUC_wang_forecee_4 <-plot_double_roc(data_wang$type, data_wang$cg18637238, data_forecee$type, data_forecee$cg18637238, col1 = "#000000", col2 = c.forecee, title= "WANG", title2 = "FORECEE", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg18637238", labelSize=2.1)
+
+AUC_wang_forecee_sum <-plot_double_roc(data_wang$type, data_wang$score.sum, data_forecee$type, data_forecee$score.sum, col1 = "#000000", col2 = c.forecee, title= "WANG", title2 = "FORECEE", style = "default",direction1 = "<",direction2 = "<", generalTitle="4 loci: sum", labelSize=2.1)
+
+
+layout <- "
+A
+B
+C
+D
+E
+"
+
+AUC_wang_forecee <- AUC_wang_forecee_1+AUC_wang_forecee_2+AUC_wang_forecee_3+AUC_wang_forecee_4 +AUC_wang_forecee_sum +  
+  plot_layout(design = layout) + plot_annotation(
+  subtitle = 'AUC in Wang and\nFORECEE Discovery Sets'
+)
+
+AUC_wang_forecee
+
+
+```
+
+
+
+
+
+
+### Compile and save
+
+```{r, message=FALSE}
+
+pdf_width <- 8.3  # Width in inches (a4)
+pdf_height <- 11.7   # Height in inches (a4: 11.7)
+
+
+layout <- "
+AAAAAAAA
+BBBBBBCC
+BBBBBBCC
+BBBBBBCC
+BBBBBBCC
+"
+
+
+compiled <- wrap_elements(grob) / boxplot_forecee_wang / 
+  wrap_elements(AUC_wang_forecee)
+  
+compiled <-  compiled + plot_annotation(tag_levels = 'a') + 
+  plot_layout(design = layout)
+
+ggsave(file.path(getwd(),"figures", "pdf","F1.pdf"), width = pdf_width, height = pdf_height, compiled)
+ggsave(file.path(getwd(),"figures", "jpg","F1.jpg"), width = pdf_width, height = pdf_height, compiled)
+```
+
+
+
+
+# Figure 2: FORECEE vs WANG cell proportions  {.tabset}
+
+
+### A): [WANG & FORECEE & GSE117929] Boxplot of cell proportions for Wang and FORECEE and GSE117929
+
+```{r,echo=FALSE,fig.width = 15, fig.hight = 7.5}
+tmp <- combined_tibble %>%  
+  dplyr::select(-c(cg, beta)) |> 
+  dplyr::distinct() |> 
+  tidyr::pivot_longer(any_of(celltypes),
+                      names_to = "Cell Type",
+                      values_to = "Fraction") |> 
+  mutate(dataset = recode(dataset, 
+                        'WANG' = 'WANG; BC', 
+                        'FORECEE' = 'FORECEE; BC',
+                        'GSE117929' = 'GSE117929; SSc')) %>%
+  mutate(dataset = factor(dataset, levels = c('WANG; BC', 'FORECEE; BC', 'GSE117929; SSc')))
+
+
+# New suggestion (after revision)
+boxplot_celltypes <-   ggplot(tmp, aes(x=type, y = Fraction, fill=type)) +
+  geom_boxplot(outlier.size = 0.5,width = 0.5) +  # Create a boxplot
+  facet_grid(dataset~`Cell Type`) +  # Facet by 'type'
+  ggpubr::stat_compare_means(comparisons = list(c('Control', 'Case')),
+                             label = 'p.format',
+                             hide.ns = T, label.y = 0.4, size=3) + 
+  labs(x = "", y = "Cell type proportion") +
+  theme_minimal() +
+  theme(legend.direction = "vertical",
+        legend.title = element_blank(),
+        axis.text.x = element_blank()) +
+  theme(strip.text.y = element_text(size = 10),
+        strip.text.x = element_text(size = 11)) +
+  coord_cartesian(clip = 'off')
+        # Display the legend horizontally
+
+
+boxplot_celltypes
+
+```
+
+### B): [WANG & FORECEE] Methylation values versus granulocyte proportion
+
+```{r, echo=FALSE,fig.width = 15, fig.hight = 7.5}
+tmp <- combined_tibble %>%  
+  mutate(dataset = recode(dataset, 
+                        'WANG' = 'WANG; BC', 
+                        'FORECEE' = 'FORECEE; BC',
+                        'GSE117929' = 'GSE117929; SSc')) %>%
+  mutate(dataset = factor(dataset, levels = c('WANG; BC', 'FORECEE; BC', 'GSE117929; SSc')))
+
+
+granulocyte_methylation <- tmp |> 
+  ggplot(aes(x = Granulocytes,
+             y = beta,
+             colour = type)) +
+  geom_point(size = 0.5, alpha = 0.6) + 
+  geom_smooth(method = 'lm', se = F) +
+  facet_grid(dataset~cg,
+             scales = 'free') +
+  labs(x = "Granulocyte proportion (Neutrophils+Eosinophils+Basophils)", y = 'β value',colour="") +
+  theme(legend.position = 'top') +
+  theme(plot.subtitle = element_text(face = "bold")) +
+  theme(strip.text = element_text(face = "bold", size = 12))   + theme_bw() +
+  theme(legend.position = "bottom",  # Move the legend to the bottom
+        legend.direction = "vertical",
+        legend.title = element_blank()) +
+  theme(strip.text.y = element_text(
+        size = 10
+        ), strip.text.x = element_text(
+        size = 8))+
+  scale_x_continuous(limits=c(0,1), n.breaks=3,
+                     labels = c('0', '0.5', '1'))+
+  scale_y_continuous(limits=c(0,1), n.breaks=3,
+                     labels = c('0', '0.5', '1')) +
+  theme(strip.background = element_rect(
+     color="white", fill="white",linetype="solid"))
+
+granulocyte_methylation
+
+```
+
+
+### C): [FORECEE+WANG] AUC-granulocytes 
+
+
+```{r, echo=FALSE,message=FALSE}
+
+AUC_granulocytes <-plot_double_roc(data_wang$type, data_wang$Granulocytes, data_forecee$type, data_forecee$Granulocytes, col1 = '#000000', col2 = c.forecee, title= "WANG", title2 = "FORECEE", style = "default",direction1 = "<",direction2 = "<", generalTitle="ROC granulocytes", labelSize=2.3)
+
+```
+
+### Compile and save
+
+```{r, message=FALSE}
+
+layout <- "
+AAAAA
+AAAAA
+AAAAA
+BBBBB
+BBBBB
+BBBBB
+C##DD
+"
+
+
+pdf_width <- 8.3  # Width in inches (a4)
+pdf_height <- 11.7   # Height in inches (a4: 11.7)
+
+
+compiled <- boxplot_celltypes / granulocyte_methylation / AUC_granulocytes
+  
+compiled <-  compiled + guide_area() + plot_annotation(tag_levels = 'a') + 
+  plot_layout(design = layout,guides = 'collect')
+
+ggsave(file.path(getwd(),"figures", "pdf","F2.pdf"), width = pdf_width, height = pdf_height, compiled)
+ggsave(file.path(getwd(),"figures", "jpg","F2.jpg"), width = pdf_width, height = pdf_height, compiled)
+```
+
+# Supplementary Figure 1: FORECEE - Stage T
+
+## A) [FORECEE] Boxplot by stage
+
+```{r}
+
+data_forecee_long$stage_T[is.na(data_forecee_long$stage_T)] <- 'Control'
+data_forecee_long$stage_T <- factor(data_forecee_long$stage_T, levels=c("Control", "Tis","T1","T2","T3","T4"))
+
+
+boxplot_values <- ggplot(data_forecee_long, aes(x = stage_T, y = beta, fill = stage_T)) +
+  geom_boxplot(outlier.size = 0.5,width = 0.5)  + ggbeeswarm::geom_quasirandom(aes(colour = 'black'),
+                               alpha = 0.5, size = 0.5) + 
+  facet_wrap(~cg, scales = 'free', nrow= 4)   +
+  labs(y = "β value", x = "", fill = "") +
+  ggpubr::stat_compare_means(ref.group = "Control",
+                             label = 'p.signif',
+                             hide.ns = T, vjust = +0.6, size=4,bracket.size = 0,tip.length = 0) +
+  theme_minimal() +
+  theme(legend.position = "",  # Move the legend to the bottom
+        legend.direction = "horizontal",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.text.y = element_text(angle = 0)) +
+  theme(strip.text.y = element_text(angle = 270, vjust = +0.8),
+        axis.text.x = element_text(angle = 45, hjust = 1))  + 
+  scale_fill_manual(values = c("Control" = c.control, "T1" = c.BC,"T2" = c.BC,"T3" = c.BC,"T4" = c.BC,"Tis" = c.BC),
+                    aesthetics = c('colour', 'fill'))
+
+boxplot_values
+```
+
+## B) [FORECEE] AUC by stage
+
+```{r}
+
+data_forecee$stage_T[is.na(data_forecee$stage_T)] <- 'Control'
+data_forecee$stratification <- ifelse(data_forecee$stage_T %in% c("T1", "Tis"), "Early stage (Tis-T1)",
+                                       ifelse(data_forecee$stage_T %in% c("T2", "T3", "T4"), "Late stage (T2-T4)", "Control"))
+
+early <- data_forecee[data_forecee$stratification != "Late stage (T2-T4)",]
+late <- data_forecee[data_forecee$stratification != "Early stage (Tis-T1)",]
+
+title1 <- "Early stage (Tis-T1)"
+title2 <- "Late stage (T2-T4)"
+
+AUC_stage_forecee_1 <- plot_double_roc(early$type, early$cg11754974, late$type, late$cg11754974, col1 = "#000000", col2 = c.forecee, title= title1, title2 = title2, style = "default",direction1 = "<",direction2 = "<", generalTitle="cg11754974", labelSize=2)
+
+AUC_stage_forecee_2 <-plot_double_roc(early$type, early$cg16652347, late$type, late$cg16652347, col1 = "#000000", col2 = c.forecee, title= title1, title2 = title2, style = "default",direction1 = "<",direction2 = "<", generalTitle="cg16652347", labelSize=2)
+
+AUC_stage_forecee_3 <-plot_double_roc(early$type, early$cg13828440, late$type, late$cg13828440, col1 = "#000000", col2 = c.forecee, title= title1, title2 = title2, style = "default",direction1 = "<",direction2 = "<", generalTitle="cg13828440", labelSize=2)
+
+AUC_stage_forecee_4 <-plot_double_roc(early$type, early$cg18637238, late$type, late$cg18637238, col1 = "#000000", col2 = c.forecee, title= title1, title2 = title2, style = "default",direction1 = "<",direction2 = "<", generalTitle="cg18637238", labelSize=2)
+
+AUC_stage_forecee_sum <-plot_double_roc(early$type, early$score.sum, late$type, late$score.sum, col1 = "#000000", col2 = c.forecee, title= title1, title2 = title2, style = "default",direction1 = "<",direction2 = "<", generalTitle="4 loci: sum", labelSize=2)
+
+
+layout <- "
+AB
+CD
+E#
+"
+
+AUC_stage_forecee <- AUC_stage_forecee_1+AUC_stage_forecee_2+AUC_stage_forecee_3+AUC_stage_forecee_4 +AUC_stage_forecee_sum +  
+  plot_layout(design = layout) + plot_annotation(
+  subtitle = 'AUC in FORECEE Discovery Set: early versus late stage cancer'
+)
+
+AUC_stage_forecee
+```
+## C) ROC based on high/low granulocytes
+
+Median granulocytes in FORECEE: 0.695116
+Median granulocytes in WANG: 0.1414578
+
+```{r}
+
+forecee_low <- data_forecee$Granulocytes < median(data_forecee$Granulocytes, na.rm = TRUE)
+forecee_high <- data_forecee$Granulocytes > median(data_forecee$Granulocytes, na.rm = TRUE)
+
+wang_low <- data_wang$Granulocytes < median(data_wang$Granulocytes, na.rm = TRUE)
+wang_high <- data_wang$Granulocytes > median(data_wang$Granulocytes, na.rm = TRUE)
+
+
+
+
+AUC_wang_forecee_1 <- plot_double_roc(data_forecee$type[forecee_low], data_forecee$cg11754974[forecee_low], data_forecee$type[forecee_high], data_forecee$cg11754974[forecee_high], col1 = c.forecee.low, col2 = c.forecee.high, title= "< 70%", title2 = "> 70%", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg11754974", labelSize=2.1)
+
+AUC_wang_forecee_2 <-plot_double_roc(data_forecee$type[forecee_low], data_forecee$cg16652347[forecee_low], data_forecee$type[forecee_high], data_forecee$cg16652347[forecee_high], col1 = c.forecee.low, col2 = c.forecee.high, title= "< 70%", title2 = "> 70%", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg16652347", labelSize=2.1)
+
+AUC_wang_forecee_3 <-plot_double_roc(data_forecee$type[forecee_low], data_forecee$cg13828440[forecee_low], data_forecee$type[forecee_high], data_forecee$cg13828440[forecee_high], col1 = c.forecee.low, col2 = c.forecee.high, title= "< 70%", title2 = "> 70%", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg13828440", labelSize=2.1)
+
+AUC_wang_forecee_4 <-plot_double_roc(data_forecee$type[forecee_low], data_forecee$cg18637238[forecee_low], data_forecee$type[forecee_high], data_forecee$cg18637238[forecee_high], col1 = c.forecee.low, col2 = c.forecee.high, title= "< 70%", title2 = "> 70%", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg18637238", labelSize=2.1)
+
+AUC_wang_forecee_sum <-plot_double_roc(data_forecee$type[forecee_low], data_forecee$score.sum[forecee_low], data_forecee$type[forecee_high], data_forecee$score.sum[forecee_high], col1 = c.forecee.low, col2 = c.forecee.high, title= "< 70%", title2 = "> 70%", style = "default",direction1 = "<",direction2 = "<", generalTitle="4 loci: sum", labelSize=2.1)
+
+
+layout <- "
+ABCDE
+"
+
+AUC_forecee_granulocytes <- AUC_wang_forecee_1+AUC_wang_forecee_2+AUC_wang_forecee_3+AUC_wang_forecee_4 +AUC_wang_forecee_sum +  
+  plot_layout(design = layout, axes = "collect") + plot_annotation(
+  subtitle = 'AUC in FORECEE Set stratified by median granulocyte proportion'
+)  & theme(axis.text.x = element_text(size = 8))
+
+
+
+
+
+
+AUC_wang_forecee_1 <- plot_double_roc(data_wang$type[wang_low], data_wang$cg11754974[wang_low], data_wang$type[wang_high], data_wang$cg11754974[wang_high], col1 = c.wang.low, col2 = c.wang.high, title= "< 14%", title2 = "> 14%", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg11754974", labelSize=2.1)
+
+AUC_wang_forecee_2 <-plot_double_roc(data_wang$type[wang_low], data_wang$cg16652347[wang_low], data_wang$type[wang_high], data_wang$cg16652347[wang_high], col1 = c.wang.low, col2 = c.wang.high, title= "< 14%", title2 = "> 14%", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg16652347", labelSize=2.1)
+
+AUC_wang_forecee_3 <-plot_double_roc(data_wang$type[wang_low], data_wang$cg13828440[wang_low], data_wang$type[wang_high], data_wang$cg13828440[wang_high], col1 = c.wang.low, col2 = c.wang.high, title= "< 14%", title2 = "> 14%", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg13828440", labelSize=2.1)
+
+AUC_wang_forecee_4 <-plot_double_roc(data_wang$type[wang_low], data_wang$cg18637238[wang_low], data_wang$type[wang_high], data_wang$cg18637238[wang_high], col1 = c.wang.low, col2 = c.wang.high, title= "< 14%", title2 = "> 14%", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg18637238", labelSize=2.1)
+
+AUC_wang_forecee_sum <-plot_double_roc(data_wang$type[wang_low], data_wang$score.sum[wang_low], data_wang$type[wang_high], data_wang$score.sum[wang_high], col1 = c.wang.low, col2 = c.wang.high, title= "< 14%", title2 = "> 14%", style = "default",direction1 = "<",direction2 = "<", generalTitle="4 loci: sum", labelSize=2.1)
+
+
+layout <- "
+ABCDE
+"
+
+AUC_wang_granulocytes <- AUC_wang_forecee_1+AUC_wang_forecee_2+AUC_wang_forecee_3+AUC_wang_forecee_4 +AUC_wang_forecee_sum +  
+  plot_layout(design = layout, axes = "collect") + plot_annotation(
+  subtitle = 'AUC in Wang Set stratified by median granulocyte proportion'
+) & theme(axis.text.x = element_text(size = 8))
+
+
+
+
+```
+
+## Compile and save
+
+```{r}
+pdf_width <- 8.3  # Width in inches (a4)
+pdf_height <- 11.7  # Height in inches (a4: 11.7)
+
+# Alternative, for significance stars in b.
+layout <- "
+AABBB
+AABBB
+AABBB
+CCCCC
+DDDDD
+"
+
+
+compiled <-  wrap_elements(boxplot_values +
+                                      plot_annotation(subtitle = 'Methylation of 8 CpGs in BC cases and control (FORECEE) stratified by cancer stage',
+                                                      caption = NULL)) / 
+  wrap_elements(AUC_stage_forecee) + wrap_elements(AUC_forecee_granulocytes)  + wrap_elements(AUC_wang_granulocytes)
+  
+compiled <-  compiled + plot_annotation(tag_levels = 'a') + 
+  plot_layout(design = layout)
+
+ggsave(file.path(getwd(),"figures", "pdf","S1.pdf"), width = pdf_width, height = pdf_height, compiled)
+ggsave(file.path(getwd(),"figures", "jpg","S1.jpg"), width = pdf_width, height = pdf_height, compiled)
+```
+
+
+
+
+# Supplementary Figure 2: PLCO and IARC  {.tabset}
+
+
+
+
+### A): [PLCO] Boxplots of the 8 CpGs in BC/normal
+
+```{r, echo=FALSE, message=FALSE}
+
+boxplot_values <- data_plco_long %>%
+  ggplot(aes(y = beta, x = type_years, fill=type_years)) +  # Added fill to color the categories
+  geom_boxplot(outlier.size=0.5,outlier.color = 'grey') +
+  facet_wrap(~ cg,
+             scales = 'free',
+             nrow = 2) +
+  labs(x = "", y = 'β value') +
+  theme(strip.background = element_rect(fill = "transparent"),
+        strip.text = element_text(face = "bold", size = 12)) +
+  theme_minimal() +
+  theme(legend.position = "bottom",  # Move the legend to the bottom
+        legend.direction = "horizontal", axis.ticks.x = element_blank(), axis.text.x = element_blank())  +
+  labs(fill = "Time to diagnosis") +
+  ggpubr::stat_compare_means(ref.group = 'Control',
+                             label = 'p.signif', vjust = +0.8,size=6, hide.ns = TRUE)  # Renaming the legend title # Display the legend horizontally
+
+boxplot_plco <- wrap_elements(boxplot_values + scale_fill_brewer(palette="RdPu") + 
+                               plot_annotation(subtitle = 'PLCO Data'))
+
+boxplot_plco
+
+```
+
+
+
+
+
+
+### B): [IARC] Boxplots of the 8 CpGs in BC/normal
+
+```{r, echo=FALSE, message=FALSE}
+
+boxplot_values <- data_iarc_long %>%
+  ggplot(aes(x = type_years,
+             y = beta, fill = type_years)) +  # Added fill to color the categories
+  geom_boxplot(outlier.size=0.5,outlier.color = 'grey') +
+  facet_wrap(~ cg,
+             scales = 'free',
+             nrow = 1) +
+  labs(x = "", y = 'β value') +
+  scale_x_discrete(labels = c('Control' = 'Normal', 'Breast' = 'BC'), breaks = NULL) +  
+  theme(strip.background = element_rect(fill = "transparent"),
+        strip.text = element_text(face = "bold", size = 12)) +
+  theme_minimal() +
+  theme(legend.position = "bottom",  # Move the legend to the bottom
+        legend.direction = "horizontal")  +
+  labs(fill = "Time to diagnosis") +
+  ggpubr::stat_compare_means(ref.group = 'Control',
+                             label = 'p.signif', vjust = +0.8,size=6, hide.ns = TRUE) +  # Renaming the legend title # Display the legend horizontally
+  guides(fill = FALSE)  # Renaming the legend title # Display the legend horizontally
+
+boxplot_iarc <- wrap_elements(boxplot_values + scale_fill_brewer(palette="RdPu") +
+                               plot_annotation(subtitle = 'IARC Data')) 
+
+boxplot_iarc
+
+```
+
+### C): [PLCO / IARC]  AUC of the 4 selected CpGs in BC/normal + SUM (<2y to diagnosis) 
+Subset to cases with close proximity to diagnosis 
+
+For ROC AUC only include the cases with closest time to diagnosis: The claim of the Wang et al paper is diagnostic and not predictive
+```{r} 
+cat("IARC: \n")
+summary(factor(data_iarc_long$type_years))
+
+cat("PLCO: \n")
+summary(factor(data_plco_long$type_years))
+
+
+# Filter the data on only those entries with <2y time to event OR controls
+data_plco_pc <- data_plco %>%
+  filter(time_to_event < 730 | type == 'Control')
+
+data_plco_pc<- data_plco_pc %>%
+  filter(!(stage_T %in% c("0", "I")) | is.na(stage_T)) # NA means control in this case
+data_iarc_pc <- data_iarc %>%
+  filter(time_to_event < 2 | type == 'Control')
+
+
+
+cat("PLCO: \n")
+summary(factor(data_plco_pc$stage_T))
+
+```
+
+```{r}
+AUC_plco_iarc_1_pc <- plot_single_roc(data_plco_pc$type, data_plco_pc$cg11754974, col1 = "#000000",title= "PLCO",generalTitle="cg11754974", labelSize=2.3) 
+
+AUC_plco_iarc_2_pc <-plot_double_roc(data_plco_pc$type, data_plco_pc$cg16652347, data_iarc_pc$type, data_iarc_pc$cg16652347, col1 = "#000000", col2 = c.forecee, title= "PLCO", title2 = "IARC", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg16652347", labelSize=2.3)
+
+AUC_plco_iarc_3_pc <-plot_double_roc(data_plco_pc$type, data_plco_pc$cg13828440, data_iarc_pc$type, data_iarc_pc$cg13828440, col1 = "#000000", col2 = c.forecee, title= "PLCO", title2 = "IARC", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg13828440", labelSize=2.3)
+
+AUC_plco_iarc_4_pc <-plot_double_roc(data_plco_pc$type, data_plco_pc$cg18637238, data_iarc_pc$type, data_iarc_pc$cg18637238, col1 = "#000000", col2 = c.forecee, title= "PLCO", title2 = "IARC", style = "default",direction1 = "<",direction2 = "<", generalTitle="cg18637238", labelSize=2.3)
+
+AUC_plco_iarc_sum_pc <-plot_double_roc(data_plco_pc$type, data_plco_pc$score.sum, data_iarc_pc$type, data_iarc_pc$score.sum, col1 = "#000000", col2 = c.forecee, title= "PLCO", title2 = "IARC", style = "default",direction1 = "<",direction2 = "<", generalTitle="4 loci: sum", labelSize=2.3)
+
+
+layout <- "
+AABB##
+AABBEE
+CCDDEE
+CCDD##
+"
+
+AUC_plco_iarc_pc <- (AUC_plco_iarc_1_pc+AUC_plco_iarc_2_pc+AUC_plco_iarc_3_pc+AUC_plco_iarc_4_pc)+AUC_plco_iarc_sum_pc + 
+  plot_layout(design=layout) + plot_annotation(
+  subtitle = 'AUC in PLCO and IARC data: cases <2 years to diagnosis'
+)
+
+```
+
+
+
+
+
+
+
+
+
+### Compile and save
+
+```{r, message=FALSE}
+layout <- "
+AAAAA
+AAAAA
+AAAAA
+BBBBB
+BBBBB
+CCCCC
+CCCCC
+CCCCC
+"
+
+
+pdf_width <- 8.3  # Width in inches (a4)
+pdf_height <- 11.7   # Height in inches (a4: 11.7)
+
+
+compiled <-  boxplot_plco/ boxplot_iarc/ wrap_elements(AUC_plco_iarc_pc)
+  
+compiled <-  compiled + plot_annotation(tag_levels = 'a') + 
+  plot_layout(design = layout)
+
+ggsave(file.path(getwd(),"figures", "pdf","S2.pdf"), width = pdf_width, height = pdf_height, compiled)
+ggsave(file.path(getwd(),"figures", "jpg","S2.jpg"), width = pdf_width, height = pdf_height, compiled)
+```
+
+# Supplementary Figure 3: Breast data  {.tabset}
+
+## A0 - insert downloaded data TCGA
+
+```{r}
+# load("~/Dropbox/data/tcga/TCGA-BRCA/beta.Rdata")
+# load("~/Dropbox/eca/sola/1-download/2-output/data.Rdata")
+beta <- load("<your-path-tcga-beta>")
+data <- load("<your-path-tcga-pheno>")
+intersect <- intersect(colnames(beta), data$barcode1)
+
+data <- data |> 
+  dplyr::slice(match(intersect, barcode1)) |> 
+  dplyr::select(barcode1, type, age)
+
+beta <- beta[,intersect]
+identical(colnames(beta), data$barcode1)
+
+library(EpiDISH)
+out.l <- epidish(beta.m = beta,
+                 ref.m = centEpiFibFatIC.m,
+                 method = "RPC")$estF
+
+data <- cbind(data,
+              centEpiFibFatIC_epi=out.l[,1],
+              centEpiFibFatIC_fib=out.l[,2],
+              centEpiFibFatIC_fat=out.l[,3],
+              centEpiFibFatIC_ic=out.l[,4])
+
+cgs <- c("cg14507403", "cg09821790", "cg15694422", "cg27527887", "cg11754974", "cg16652347","cg13828440","cg18637238")
+cgs <- cgs[cgs%in% rownames(beta)]
+tmp <- as.numeric(t(beta[cgs,]))
+
+data <- cbind(data, cg156694422 = tmp)
+
+# table(data$type)
+
+theme_set(
+  theme_minimal()
+)
+
+data_tcga <- data
+```
+
+## A) TCGA 
+
+```{r}
+a <- data_tcga |> 
+  dplyr::mutate(type = ifelse(type == "Control", "Normal breast tissue", "Breast cancer tissue")) |> 
+  ggplot(aes(x = centEpiFibFatIC_ic,
+             y = cg156694422,
+             colour = type)) +
+  geom_point(alpha = 0.2,
+             size = 0.6) +
+  geom_smooth(method = 'lm',
+              se = F) +
+  labs(x = 'immune cell proportion',
+       title = 'TCGA data') +
+  theme(legend.position = 'top',
+        legend.title = element_blank()) +
+  annotate("segment",
+           x = -0.02, xend = -0.02,
+           y = 0.83, yend = 0.89,
+           arrow = arrow(ends = 'both',
+                         length = unit(0.1, 'cm')),
+           colour = 'grey20') +
+  annotate("segment",
+           x = 0.35, xend = 0.35,
+           y = 0.57, yend = 0.61,
+           arrow = arrow(ends = 'both',
+                         length = unit(0.1, 'cm')),
+           colour = 'grey20') +
+  guides(colour  = guide_legend(nrow = 2))
+```
+
+## B) TCGA IC < 5%
+
+```{r}
+library(gghalves)
+b <- data_tcga |> 
+  dplyr::filter(centEpiFibFatIC_ic < 0.05) |> 
+  dplyr::mutate(type = ifelse(type == "Control", "Normal breast tissue", "Breast cancer tissue")) |> 
+  ggplot(aes(x = type,
+             y = cg156694422)) +
+  geom_half_boxplot(outlier.shape = NA,
+                    aes(fill = type)) +
+  geom_half_point_panel(size = 1,
+                        alpha = 0.5,
+                        aes(colour = type))  +
+  ggpubr::stat_compare_means(comparisons = list(c('Breast cancer tissue','Normal breast tissue')),
+                             label = 'p.format') +
+  theme(axis.text.x = element_blank(),
+        legend.position = 'none') +
+  labs(x = '',
+       title = 'TCGA\nsamples with <5% immune cells') +
+  guides(colour = guide_legend(nrow = 2),
+         fill = guide_legend(nrow = 2)) +
+  coord_cartesian(clip = 'off')
+```
+
+## C0 - insert downloaded data EPIC BC set
+
+Data can be downloaded / accessed via: 
+https://ega-archive.org/studies/EGAS00001005070
+
+```{r}
+load("~/Dropbox/data/tissue-at-risk/beta_merged.Rdata")
+load("~/Dropbox/eca/0-master-dataset/mdat.Rdata")
+
+data <- mdat |> dplyr::filter(experiment_name == "TISSUE_AT_RISK" & dataset_name == '14x4_Breast_Set') |> 
+  droplevels()
+
+# beta_merged <- load("<your-path-beta>")
+# data <- load("<your-path-pheno>") 
+
+beta <- beta_merged[,rownames(data)]
+identical(rownames(data), colnames(beta))
+
+out.l <- epidish(beta.m = beta,
+                 ref.m = centEpiFibFatIC.m,
+                 method = "RPC")$estF
+data <- cbind(data,
+              centEpiFibFatIC_epi=out.l[,1],
+              centEpiFibFatIC_fib=out.l[,2],
+              centEpiFibFatIC_fat=out.l[,3],
+              centEpiFibFatIC_ic=out.l[,4])
+
+cgs <- c("cg14507403", "cg09821790", "cg15694422", "cg27527887", "cg11754974", "cg16652347","cg13828440","cg18637238")
+cgs <- cgs[cgs%in% rownames(beta)]
+tmp <- t(beta[cgs,])
+data <- cbind(data, tmp)
+
+data_epic <- data |> 
+  tidyr::pivot_longer(cols = any_of(c(cgs)),
+                      names_to = 'cg',
+                      values_to = 'beta')
+```
+
+
+## C) EPIC BC set
+
+```{r}
+theme_set(
+  theme_minimal()
+)
+
+c <- data_epic |> 
+  dplyr::mutate(type = ifelse(type == "Triple_negative_tumour", "Breast cancer tissue", "Normal breast tissue")) |> 
+  ggplot(aes(x = centEpiFibFatIC_ic,
+             y = beta,
+             colour = type)) +
+  geom_point(alpha = 0.35,
+             size = 0.7) +
+  geom_smooth(method = 'lm',
+              se = F) +
+  labs(x = 'immune cell proportion',
+       title = 'EPIC BC dataset') +
+  theme(legend.position = 'none',
+        legend.title = element_blank()) +
+  facet_wrap(~cg,
+             nrow = 1)
+
+```
+
+
+## D) EPIC BC IC < 20%
+
+```{r}
+d <- data_epic |> 
+  dplyr::filter(centEpiFibFatIC_ic < 0.20) |> 
+  dplyr::mutate(type = ifelse(type == "Triple_negative_tumour", "Breast cancer tissue", "Normal breast tissue")) |> 
+  ggplot(aes(x = type,
+             y = beta)) +
+  geom_half_boxplot(outlier.shape = NA,
+                    aes(fill = type)) +
+  geom_half_point_panel(size = 1,
+                        alpha = 0.5,
+                        aes(colour = type))  +
+  ggpubr::stat_compare_means(comparisons = list(c('Breast cancer tissue','Normal breast tissue')),
+                             label = 'p.format',
+                             label.y.npc = 0.8,
+                             size = 3.2) +
+  theme(axis.text.x = element_blank(),
+        legend.position = 'none') +
+  labs(x = '',
+       title = 'EPIC BC dataset\nsamples with <20% immune cells') +
+  guides(colour = guide_legend(nrow = 2),
+         fill = guide_legend(nrow = 2)) +
+  facet_wrap(~cg, nrow = 1) +
+  coord_cartesian(clip = 'off')
+```
+
+## E0 - insert downloaded data GSE225845 set
+
+```{r}
+load("~/Dropbox/eca/Buccal BC index/repository/WID-buccal/0-data/GSE22845/beta_merged.Rdata")
+load("~/Dropbox/eca/Buccal BC index/repository/WID-buccal/0-data/GSE22845/pheno_trimmed.Rdata")
+
+beta <- beta_merged[,rownames(pheno_trimmed)]
+identical(rownames(pheno_trimmed), colnames(beta))
+
+out.l <- epidish(beta.m = beta,
+                 ref.m = centEpiFibFatIC.m,
+                 method = "RPC")$estF
+data <- cbind(pheno_trimmed,
+              centEpiFibFatIC_epi=out.l[,1],
+              centEpiFibFatIC_fib=out.l[,2],
+              centEpiFibFatIC_fat=out.l[,3],
+              centEpiFibFatIC_ic=out.l[,4])
+
+cgs <- c("cg14507403", "cg09821790", "cg15694422", "cg27527887", "cg11754974", "cg16652347","cg13828440","cg18637238")
+cgs <- cgs[cgs%in% rownames(beta)]
+tmp <- t(beta[cgs,])
+data <- cbind(data, tmp)
+
+data_gse <- data |> 
+  tidyr::pivot_longer(cols = any_of(c(cgs)),
+                      names_to = 'cg',
+                      values_to = 'beta')
+```
+
+## E) GSE225845
+
+```{r}
+theme_set(
+  theme_minimal()
+)
+
+e <- data_gse |> 
+  dplyr::mutate(type = case_when(type == "tumor" ~ "Breast cancer tissue",
+                                 type == "adj_norm" ~ "Normal-adjacent tissue",
+                                 type == "normal" ~ "Normal breast tissue"),
+                type = factor(type, levels = c("Breast cancer tissue",  "Normal-adjacent tissue", "Normal breast tissue"))) |> 
+  ggplot(aes(x = centEpiFibFatIC_ic,
+             y = beta,
+             colour = type)) +
+  geom_point(alpha = 0.35,
+             size = 0.7) +
+  geom_smooth(method = 'lm',
+              se = F) +
+  labs(x = 'immune cell proportion',
+       title = 'GSE225845') +
+  scale_colour_manual(values = c("Breast cancer tissue" = c.BC, 
+                               "Normal breast tissue" = c.control,
+                               "Normal-adjacent tissue" = 'grey')) +
+  theme(legend.position = 'top',
+        legend.title = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~cg,
+             nrow = 1)
+```
+
+## F) GSE225845 IC < 5%
+
+```{r}
+f <- data_gse |> 
+  dplyr::filter(centEpiFibFatIC_ic < 0.05) |> 
+  dplyr::mutate(type = case_when(type == "tumor" ~ "Breast cancer tissue",
+                                 type == "adj_norm" ~ "Normal-adjacent tissue",
+                                 type == "normal" ~ "Normal breast tissue"),
+                type = factor(type, levels = c("Breast cancer tissue",  "Normal-adjacent tissue", "Normal breast tissue"))) |> 
+  ggplot(aes(x = type,
+             y = beta)) +
+  geom_half_boxplot(outlier.shape = NA,
+                    aes(fill = type)) +
+  geom_half_point_panel(size = 1,
+                        alpha = 0.5,
+                        aes(colour = type))  +
+  ggpubr::stat_compare_means(comparisons = list(c('Breast cancer tissue','Normal breast tissue')),
+                             label = 'p.format',
+                             label.y.npc = 0.8,
+                             size = 3.2) +
+    scale_colour_manual(values = c("Breast cancer tissue" = c.BC, 
+                               "Normal breast tissue" = c.control,
+                               "Normal-adjacent tissue" = 'grey')) +
+  scale_fill_manual(values = c("Breast cancer tissue" = c.BC, 
+                             "Normal breast tissue" = c.control,
+                             "Normal-adjacent tissue" = 'grey')) +
+
+  theme(axis.text.x = element_blank(),
+        legend.position = 'none') +
+  labs(x = '',
+       title = 'GSE225845\nsamples with <5% immune cells') +
+  guides(colour = guide_legend(nrow = 2),
+         fill = guide_legend(nrow = 2)) +
+  facet_wrap(~cg, nrow = 1) +
+  coord_cartesian(clip = 'off')
+```
+
+## Compile and save
+
+```{r, message=FALSE}
+
+design <-"
+AB######
+CCCCCCCC
+DDDDDDDD
+EEEEEEEE
+FFFFFFFF
+"
+
+
+pdf_width <- 8.3  # Width in inches (a4)
+pdf_height <- 11.7  # Height in inches (a4: 11.7)
+
+
+compiled <-  (a + b + c + d + e + f)  + plot_layout(design = design) + plot_annotation(tag_levels = 'a') 
+  
+
+ggsave(file.path(getwd(),"figures", "pdf","S3.pdf"), width = pdf_width, height = pdf_height, compiled)
+ggsave(file.path(getwd(),"figures", "jpg","S3.jpg"), width = pdf_width, height = pdf_height, compiled)
+```
+
+
+# Supplementary Figure 4: SNP properties  {.tabset}
+
+### A) Show significantly associated SNP values with methylation values
+
+```{r, echo=FALSE, message=FALSE}
+
+
+snp_plot <- pheno_long %>%
+  mutate(type = recode(type, 'Breast' = 'Case', 'Control' = 'Control')) %>%
+  ggplot(aes(x = hepidish_Neutro+hepidish_Eosino+hepidish_B,
+             y = cg14507403,
+             color = as.factor(genotype),
+             shape = type)) +
+  geom_point() +
+  facet_wrap(~mqtl) +
+  theme_minimal() +
+  labs(x = 'Granulocyte fraction (Neutrophils+Eosinophils+Basophils)', color = 'Genotype', shape = 'Type')
+
+# Modify x-axis to show only highest and lowest numbers for readability
+snp_plot <- snp_plot +
+  scale_x_continuous(
+    breaks = c(min(pheno_long$ic), max(pheno_long$ic)),
+    labels = scales::number_format(accuracy = 0.01), # Rounds to 2 decimals
+    expand = c(0.02, 0)  # Adjust expansion of x-axis for better spacing
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 8))  # Rotate x-axis labels
+
+snp_plot
+
+```
+
+### B): [Wang, FORECEE, PLCO] Plot of trimodal distribution of 'snp' CpG site in all datasets
+
+```{r, echo=FALSE, message=FALSE}
+granulocyte_snp <- combined_cg14507403 |> 
+  ggplot(aes(x = Granulocytes,
+             y = beta,
+             colour = type)) +
+  geom_point(size = 0.5) + 
+  geom_smooth(method = 'lm') +
+  facet_grid(~dataset,
+             scales = 'free') +
+  labs(x = "Granulocyte proportion (Neutrophils+Eosinophils+Basophils)", y = 'β value',colour="Type") +
+  theme(legend.position = 'top') +
+  theme(plot.subtitle = element_text(face = "bold")) +
+  theme(strip.background = element_rect(fill = "transparent"),  # Remove grey background
+        strip.text = element_text(face = "bold", size = 12))    + theme_bw() +
+  theme(legend.position = "bottom",  # Move the legend to the bottom
+        legend.direction = "horizontal")  # Display the legend horizontally  # Increase text size  # Increase text size
+
+granulocyte_snp +  plot_annotation(
+  subtitle = 'Methylation of cg14507403 in three datasets'
+)
+```
+
+
+
+
+### Compile and save
+
+```{r, message=FALSE}
+layout <- "
+AAAAA
+AAAAA
+AAAAA
+BBBBB
+"
+
+pdf_width <- 8.5  # Width in inches
+pdf_height <- 11   # Height in inches
+
+
+compiled <- snp_plot / granulocyte_snp
+  
+compiled <-  compiled + plot_annotation(tag_levels = 'a') + 
+  plot_layout(design = layout)
+
+ggsave(file.path(getwd(),"figures", "pdf","S4.pdf"), width = pdf_width, height = pdf_height, compiled)
+ggsave(file.path(getwd(),"figures", "jpg","S4.jpg"), width = pdf_width, height = pdf_height, compiled)
+```
+
