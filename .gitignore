@@ -4,3 +4,6 @@
 figures/ORECEE_HER_ER_PR.R
 .DS_Store
 figures/*
+*.jpg
+*.pdf
+*.html
