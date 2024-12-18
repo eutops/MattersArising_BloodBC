@@ -1,9 +1,10 @@
 .Rproj.user
 .Rhistory
 
-figures/ORECEE_HER_ER_PR.R
+figures/FORECEE_HER_ER_PR.R
 .DS_Store
 figures/*
 *.jpg
 *.pdf
 *.html
+README.html
